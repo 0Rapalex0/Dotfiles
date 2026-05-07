@@ -1,0 +1,105 @@
+{
+    "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+    "logo": {
+        "source": "~/.config/fastfetch/hornet.png", // Asegúrate de que el archivo exista aquí
+        "type": "kitty",
+        "width": 28,
+        "height": 12,
+        "padding": {
+            "top": 2,
+            "left": 2
+        }
+    },
+    "display": {
+        "separator": "  ",
+        "color": {
+            "keys": "35" // Magenta/Pink en la mayoría de esquemas
+        }
+    },
+    "modules": [
+        {
+            "type": "title",
+            "format": " {6} HollowSec the coffee race at dawn...",
+            "color": {
+                "user": "37", 
+                "at": "37",
+                "host": "37"
+            }
+        },
+        {
+            "type": "custom",
+            "format": "┌──────────────────────────────────────────────────────────────────────────┐",
+            "color": "37" 
+        },
+        {
+            "type": "host",
+            "key": "  󰀝 User",
+            "keyColor": "35" // Usamos 35 (Magenta) que en Tokyo Night se ve como rosa/morado
+        },
+        {
+            "type": "os",
+            "key": "  󰣇 OS  ",
+            "keyColor": "35"
+        },
+        {
+            "type": "packages",
+            "key": "  󰏖 Pkgs",
+            "keyColor": "32" // Verde
+        },
+        {
+            "type": "cpu",
+            "key": "  󰻠 CPU ",
+            "keyColor": "31" // Rojo
+        },
+        {
+            "type": "gpu",
+            "key": "  󰍛 GPU ",
+            "keyColor": "31"
+        },
+        {
+            "type": "memory",
+            "key": "  󰑭 Mem ",
+            "keyColor": "35"
+        },
+        {
+            "type": "custom",
+            "format": "├──────────────────────────────────────────────────────────────────────────┤",
+            "color": "37"
+        },
+        {
+            "type": "display",
+            "key": "  󰍹 Disp",
+            "keyColor": "31"
+        },
+        {
+            "type": "wm",
+            "key": "  󱂬 WM  ",
+            "keyColor": "31"
+        },
+        {
+            "type": "terminal",
+            "key": "  󰆍 Term",
+            "keyColor": "33" // Amarillo
+        },
+        {
+            "type": "uptime",
+            "key": "  󰅐 Up  ",
+            "keyColor": "32"
+        },
+        {
+            "type": "disk",
+            "key": "  󰋊 Disk",
+            "keyColor": "33"
+        },
+        {
+            "type": "custom",
+            "format": "└──────────────────────────────────────────────────────────────────────────┘",
+            "color": "37"
+        },
+        "break",
+        {
+            "type": "colors",
+            "symbol": "circle"
+        }
+    ]
+}

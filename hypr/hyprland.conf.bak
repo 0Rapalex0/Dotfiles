@@ -1,0 +1,96 @@
+exec-once = eww daemon
+exec-once = eww open sidebar_window
+
+# Hyprland Config - Estética Tokyo Night / Punk
+# Optimizado para nuevas versiones (Git) y Ubuntu 26.04
+
+# --- Monitores ---
+# Ajuste de resolución y reserva de espacio para Eww (75px arriba)
+monitor=eDP-1, 1920x1080@60, 0x0, 1
+monitor=eDP-1, addreserved, 0, 0, 0, 0
+
+# --- Variables Principales ---
+$mainMod = SUPER
+$terminal = kitty
+$fileManager = dolphin
+$menu = wofi --show drun
+
+# --- Estética General ---
+general {
+    gaps_in = 2
+    gaps_out = 20
+    border_size = 2
+    col.active_border = rgb(bb9af7) # Color 'Mauve' de Tokyo Night
+    col.inactive_border = rgba(595959aa)
+
+    layout = dwindle
+}
+
+# --- Decoración (SINTAXIS CORREGIDA) ---
+decoration {
+    rounding = 12
+
+    # En versiones nuevas, shadow es un bloque independiente
+    shadow {
+        enabled = true
+        range = 4
+        render_power = 3
+        color = rgba(1a1a1aee)
+    }
+
+    blur {
+        enabled = true
+        size = 3
+        passes = 1
+    }
+}
+
+# --- Animaciones ---
+animations {
+    enabled = yes
+    bezier = myBezier, 0.05, 0.9, 0.1, 1.05
+    animation = windows, 1, 7, myBezier
+    animation = windowsOut, 1, 7, default, popin 80%
+    animation = border, 1, 10, default
+    animation = fade, 1, 7, default
+    animation = workspaces, 1, 6, default
+}
+
+# --- Atajos de Teclado (Binds) ---
+# Ejecución de apps
+bind = $mainMod, Q, exec, $terminal
+bind = $mainMod, E, exec, $fileManager
+bind = $mainMod, R, exec, $menu
+
+# Gestión de ventanas
+bind = $mainMod, C, killactive, 
+bind = $mainMod, M, exit, 
+bind = $mainMod, V, togglefloating, 
+bind = $mainMod, P, pseudo, # dwindle
+bind = $mainMod, J, layoutmsg, togglesplit
+# Mover el foco (Flechas)
+bind = $mainMod, left, movefocus, l
+bind = $mainMod, right, movefocus, r
+bind = $mainMod, up, movefocus, u
+bind = $mainMod, down, movefocus, d
+
+# Cambiar de Workspace (1-5)
+bind = $mainMod, 1, workspace, 1
+bind = $mainMod, 2, workspace, 2
+bind = $mainMod, 3, workspace, 3
+bind = $mainMod, 4, workspace, 4
+bind = $mainMod, 5, workspace, 5
+
+# Mover ventana a Workspace
+bind = $mainMod SHIFT, 1, movetoworkspace, 1
+bind = $mainMod SHIFT, 2, movetoworkspace, 2
+bind = $mainMod SHIFT, 3, movetoworkspace, 3
+
+# --- Otros ---
+gestures {
+    #workspace_swipe = true 
+}
+
+misc {
+    force_default_wallpaper = 0
+}
