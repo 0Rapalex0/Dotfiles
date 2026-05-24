@@ -8,22 +8,46 @@ import QtQuick.Controls
 
 ShellRoot {
 
-    QtObject {
-        id: colors
-        readonly property string bg:      "#1a1b26"
-        readonly property string bg2:     "#16161e"
-        readonly property string surface: "#2f3549"
-        readonly property string overlay: "#414868"
-        readonly property string subtext: "#a9b1d6"
-        readonly property string blue:    "#7aa2f7"
-        readonly property string mauve:   "#bb9af7"
-        readonly property string pink:    "#f7768e"
-        readonly property string green:   "#9ece6a"
-        readonly property string yellow:  "#e0af68"
-        readonly property string peach:   "#ff9e64"
-        readonly property string red:     "#f7768e"
-        readonly property string text:    "#c0caf5"
+FileView {
+    id: colorWatcher
+    path: Qt.resolvedUrl("colors.qml")
+    watchChanges: true
+    onFileChanged: Qt.callLater(() => colors.reload())
+}
+
+property int colorVersion: 0
+
+Process {
+    id: colorWatchProc
+    command: ["inotifywait", "-m", "-e", "close_write",
+              "/home/jazzajf/.config/quickshell/colors.qml"]
+    running: true
+    stdout: SplitParser {
+        onRead: (l) => { colorVersion++ }
     }
+}
+
+Loader {
+    id: colorLoader
+    source: "/home/jazzajf/.config/quickshell/colors.qml?v=" + colorVersion
+}
+
+QtObject {
+    id: colors
+    readonly property string bg:      colorLoader.item ? colorLoader.item.bg      : "#1a1b26"
+    readonly property string bg2:     colorLoader.item ? colorLoader.item.bg2     : "#16161e"
+    readonly property string surface: colorLoader.item ? colorLoader.item.surface : "#2f3549"
+    readonly property string overlay: colorLoader.item ? colorLoader.item.overlay : "#414868"
+    readonly property string subtext: colorLoader.item ? colorLoader.item.subtext : "#a9b1d6"
+    readonly property string blue:    colorLoader.item ? colorLoader.item.blue    : "#7aa2f7"
+    readonly property string mauve:   colorLoader.item ? colorLoader.item.mauve   : "#bb9af7"
+    readonly property string pink:    colorLoader.item ? colorLoader.item.pink    : "#f7768e"
+    readonly property string green:   colorLoader.item ? colorLoader.item.green   : "#9ece6a"
+    readonly property string yellow:  colorLoader.item ? colorLoader.item.yellow  : "#e0af68"
+    readonly property string peach:   colorLoader.item ? colorLoader.item.peach   : "#ff9e64"
+    readonly property string red:     colorLoader.item ? colorLoader.item.red     : "#f7768e"
+    readonly property string text:    colorLoader.item ? colorLoader.item.text    : "#c0caf5"
+}
 
     property string cpuVal: "0"
     property string ramVal: "0"
@@ -40,12 +64,16 @@ ShellRoot {
     property bool btVisible: false
     property bool volVisible: false
     property bool brightVisible: false
+    property bool powerVisible: false
+    property bool weatherVisible: false
+    property int agsTab: 0   // 0=Dashboard 1=Media 2=Performance 3=Workspaces
     property string btDevice: ""
     property string btBattery: ""
     property string weatherFull: ""
     property string weatherHours: ""
     property string musicArtist: ""
     property string musicAlbum: ""
+    property string musicArtUrl: ""
     property string musicPos: "0"
     property string musicLen: "1"
     property string cpuTemp: "?"
@@ -74,6 +102,8 @@ ShellRoot {
         stdout: SplitParser { onRead: (l) => musicPos = l.trim() } }
     Process { id: musicLenProc; command: ["bash", "-c", "playerctl metadata mpris:length 2>/dev/null || echo '1'"]
         stdout: SplitParser { onRead: (l) => musicLen = l.trim() === "" ? "1" : l.trim() } }
+    Process { id: musicArtProc; command: ["bash", "-c", "playerctl metadata mpris:artUrl 2>/dev/null || echo ''"]
+        stdout: SplitParser { onRead: (l) => musicArtUrl = l.trim() } }
     Process { id: cpuTempProc; command: ["bash", "-c", "cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null | awk '{printf \"%.0f\", $1/1000}' || echo '?'"]
         stdout: SplitParser { onRead: (l) => cpuTemp = l.trim() } }
     Process { id: ramDetailProc; command: ["bash", "-c", "free -m | awk '/Mem:/{print $3\" \"$2}'"]
@@ -88,17 +118,30 @@ ShellRoot {
         stdout: SplitParser { onRead: (l) => weatherFull = l.trim() } }
     Process { id: weatherHoursProc; command: ["bash", "-c", "curl -s 'wttr.in/Puebla?format=%H:%M+%t+%C' 2>/dev/null || echo ''"]
         stdout: SplitParser { onRead: (l) => weatherHours = l.trim() } }
+    // Forecast de 3 slots horarios: "HH|icon|temp§HH|icon|temp§HH|icon|temp"
+    property string weatherForecast: ""
+    Process { id: weatherForecastProc
+        command: ["bash", "-c", [
+            "curl -s 'wttr.in/Puebla?format=json' 2>/dev/null | python3 -c \"",
+            "import sys,json; d=json.load(sys.stdin); h=d['weather'][0]['hourly'];",
+            "now=__import__('datetime').datetime.now().hour;",
+            "slots=[x for x in h if int(x['time'])//100>=now][:3] or h[:3];",
+            "print('§'.join(x['time'].zfill(4)[:2]+'h|'+x['weatherDesc'][0]['value']+'|'+x['tempC']+'°' for x in slots))\"",
+            "|| echo ''"
+        ].join("")]
+        stdout: SplitParser { onRead: (l) => weatherForecast = l.trim() }
+    }
 
     Timer { interval: 5000; running: true; repeat: true
         onTriggered: { cpuProc.running = true; ramProc.running = true; cpuTempProc.running = true; ramDetailProc.running = true; diskProc.running = true } }
     Timer { interval: 2000; running: true; repeat: true
-        onTriggered: { musicTitleProc.running = true; musicStatusProc.running = true; volProc.running = true; musicArtistProc.running = true; musicPosProc.running = true; musicLenProc.running = true } }
+        onTriggered: { musicTitleProc.running = true; musicStatusProc.running = true; volProc.running = true; musicArtistProc.running = true; musicPosProc.running = true; musicLenProc.running = true; musicArtProc.running = true } }
     Timer { interval: 900000; running: true; repeat: true
         onTriggered: weatherProc.running = true }
     Timer { interval: 30000; running: true; repeat: true
         onTriggered: { netProc.running = true; brightProc.running = true; btDeviceProc.running = true } }
     Timer { interval: 600000; running: true; repeat: true
-        onTriggered: { weatherFullProc.running = true; weatherHoursProc.running = true } }
+        onTriggered: { weatherFullProc.running = true; weatherHoursProc.running = true; weatherForecastProc.running = true } }
 
     Component.onCompleted: {
         cpuProc.running = true; ramProc.running = true
@@ -109,7 +152,7 @@ ShellRoot {
         musicLenProc.running = true; cpuTempProc.running = true
         ramDetailProc.running = true; diskProc.running = true
         btDeviceProc.running = true; weatherFullProc.running = true
-        weatherHoursProc.running = true
+        weatherHoursProc.running = true; weatherForecastProc.running = true
     }
 
     // ══════════════════════════════════════
@@ -142,41 +185,55 @@ ShellRoot {
                 anchors.margins: 16
                 spacing: 14
 
-                // Portada (placeholder con inicial del artista)
-                Rectangle {
-                    width: 80; height: 80
-                    radius: 12
-                    color: colors.surface
-                    border.color: Qt.rgba(154/255, 206/255, 106/255, 0.4)
-                    border.width: 1
-                    Layout.alignment: Qt.AlignVCenter
+                // Portada
+Rectangle {
+    width: 80; height: 80
+    radius: 12
+    color: colors.surface
+    border.color: Qt.rgba(154/255, 206/255, 106/255, 0.4)
+    border.width: 1
+    Layout.alignment: Qt.AlignVCenter
+    clip: true
 
-                    Text {
-                        anchors.centerIn: parent
-                        text: musicArtist.length > 0 ? musicArtist[0].toUpperCase() : "♪"
-                        font.family: "JetBrainsMono Nerd Font"
-                        font.pixelSize: 32
-                        font.bold: true
-                        color: colors.green
-                    }
+    // Imagen real desde MPRIS artUrl
+    Image {
+        id: coverImg
+        anchors.fill: parent
+        source: musicArtUrl !== "" ? musicArtUrl : ""
+        fillMode: Image.PreserveAspectCrop
+        visible: status === Image.Ready
+        layer.enabled: true
+        layer.effect: null
+    }
 
-                    // Animación de pulso cuando está reproduciendo
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: parent.radius
-                        color: "transparent"
-                        border.color: colors.green
-                        border.width: 2
-                        opacity: musicStatus === "Playing" ? 0.6 : 0
-                        Behavior on opacity { NumberAnimation { duration: 400 } }
-                        SequentialAnimation on scale {
-                            running: musicStatus === "Playing"
-                            loops: Animation.Infinite
-                            NumberAnimation { to: 1.05; duration: 800; easing.type: Easing.InOutSine }
-                            NumberAnimation { to: 1.0;  duration: 800; easing.type: Easing.InOutSine }
-                        }
-                    }
-                }
+    // Fallback: inicial del artista (solo si no hay imagen)
+    Text {
+        anchors.centerIn: parent
+        text: musicArtist.length > 0 ? musicArtist[0].toUpperCase() : "♪"
+        font.family: "JetBrainsMono Nerd Font"
+        font.pixelSize: 32
+        font.bold: true
+        color: colors.green
+        visible: coverImg.status !== Image.Ready
+    }
+
+    // Animación de pulso cuando está reproduciendo
+    Rectangle {
+        anchors.fill: parent
+        radius: parent.radius
+        color: "transparent"
+        border.color: colors.green
+        border.width: 2
+        opacity: musicStatus === "Playing" ? 0.6 : 0
+        Behavior on opacity { NumberAnimation { duration: 400 } }
+        SequentialAnimation on scale {
+            running: musicStatus === "Playing"
+            loops: Animation.Infinite
+            NumberAnimation { to: 1.05; duration: 800; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 1.0;  duration: 800; easing.type: Easing.InOutSine }
+        }
+    }
+}
 
                 // Info y controles
                 ColumnLayout {
@@ -267,110 +324,141 @@ ShellRoot {
     }
 
     // ══════════════════════════════════════
-    //  SISTEMA POPUP (CPU / RAM / DISCO)
+    //  SISTEMA POPUP — overlay central
     // ══════════════════════════════════════
     PanelWindow {
         id: sysWindow
         anchors.left: true
+        anchors.right: true
         anchors.top: true
-        implicitWidth: sysVisible ? 390 : 0
-        implicitHeight: 230
+        anchors.bottom: true
         exclusiveZone: -1
         color: "transparent"
         visible: sysVisible
-        Behavior on implicitWidth { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
         Rectangle {
             anchors.fill: parent
-            anchors.margins: 6
-            anchors.leftMargin: 84
-            anchors.rightMargin: 6
-            color: colors.bg
-            radius: 16
-            border.color: Qt.rgba(255/255, 158/255, 100/255, 0.3)
-            border.width: 1
-            clip: true
+            color: Qt.rgba(0, 0, 0, 0.70)
+            MouseArea { anchors.fill: parent; onClicked: sysVisible = false }
 
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 16
-                spacing: 12
+            Rectangle {
+                anchors.centerIn: parent
+                width: 500
+                height: 400
+                radius: 24
+                color: colors.bg
+                border.color: Qt.rgba(255/255, 158/255, 100/255, 0.35)
+                border.width: 1
+                MouseArea { anchors.fill: parent }
 
-                Text {
-                    text: "  Sistema"
-                    font.family: "JetBrainsMono Nerd Font"
-                    font.pixelSize: 13
-                    font.bold: true
-                    color: colors.peach
-                }
+                scale: sysVisible ? 1.0 : 0.88
+                opacity: sysVisible ? 1.0 : 0.0
+                Behavior on scale   { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
+                Behavior on opacity { NumberAnimation { duration: 180 } }
 
-                Rectangle { Layout.fillWidth: true; height: 1; color: Qt.rgba(255/255,158/255,100/255,0.2) }
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 32
+                    spacing: 24
 
-                // Fila CPU
-                RowLayout {
-                    Layout.fillWidth: true; spacing: 10
-                    Text { text: "󰻠  CPU"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 11; color: colors.peach; Layout.preferredWidth: 60 }
-                    Rectangle {
-                        Layout.fillWidth: true; height: 8; radius: 4; color: colors.surface
-                        Rectangle {
-                            width: Math.min(1.0, (parseFloat(cpuVal)||0)/100) * parent.width
-                            height: parent.height; radius: 4
-                            color: parseFloat(cpuVal) > 80 ? colors.red : parseFloat(cpuVal) > 50 ? colors.yellow : colors.peach
-                            Behavior on width { NumberAnimation { duration: 600 } }
+                    // Título + temp
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text {
+                            text: "󰻠  Sistema"
+                            font.family: "JetBrainsMono Nerd Font"
+                            font.pixelSize: 22; font.bold: true
+                            color: colors.peach
+                        }
+                        Item { Layout.fillWidth: true }
+                        Column {
+                            spacing: 2
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: "󰔏"
+                                font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 18
+                                color: parseFloat(cpuTemp) > 80 ? colors.red : parseFloat(cpuTemp) > 60 ? colors.yellow : colors.green
+                            }
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: cpuTemp + "°C"
+                                font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 13; font.bold: true
+                                color: parseFloat(cpuTemp) > 80 ? colors.red : parseFloat(cpuTemp) > 60 ? colors.yellow : colors.green
+                            }
                         }
                     }
-                    Text { text: cpuVal + "%"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 11; color: colors.subtext; Layout.preferredWidth: 36 }
-                }
 
-                // Temp CPU
-                RowLayout {
-                    Layout.fillWidth: true; spacing: 10
-                    Text { text: "󰔏  Temp"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 11; color: colors.yellow; Layout.preferredWidth: 60 }
-                    Rectangle {
-                        Layout.fillWidth: true; height: 8; radius: 4; color: colors.surface
-                        Rectangle {
-                            width: Math.min(1.0, (parseFloat(cpuTemp)||0)/100) * parent.width
-                            height: parent.height; radius: 4
-                            color: parseFloat(cpuTemp) > 80 ? colors.red : parseFloat(cpuTemp) > 60 ? colors.yellow : colors.green
-                            Behavior on width { NumberAnimation { duration: 600 } }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Qt.rgba(255/255,158/255,100/255,0.2) }
+
+                    // CPU
+                    ColumnLayout { Layout.fillWidth: true; spacing: 10
+                        RowLayout { Layout.fillWidth: true
+                            Text { text: "󰻠  CPU"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 15; color: colors.peach }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: cpuVal + "%"
+                                font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 24; font.bold: true
+                                color: parseFloat(cpuVal) > 80 ? colors.red : parseFloat(cpuVal) > 50 ? colors.yellow : colors.peach
+                            }
+                        }
+                        Rectangle { Layout.fillWidth: true; height: 14; radius: 7; color: colors.surface
+                            Rectangle {
+                                width: Math.min(1.0, (parseFloat(cpuVal)||0)/100) * parent.width
+                                height: parent.height; radius: 7
+                                color: parseFloat(cpuVal) > 80 ? colors.red : parseFloat(cpuVal) > 50 ? colors.yellow : colors.peach
+                                Behavior on width { NumberAnimation { duration: 600 } }
+                            }
                         }
                     }
-                    Text { text: cpuTemp + "°"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 11; color: colors.subtext; Layout.preferredWidth: 36 }
-                }
 
-                // RAM
-                RowLayout {
-                    Layout.fillWidth: true; spacing: 10
-                    Text { text: "󰍛  RAM"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 11; color: colors.green; Layout.preferredWidth: 60 }
-                    Rectangle {
-                        Layout.fillWidth: true; height: 8; radius: 4; color: colors.surface
-                        Rectangle {
-                            width: Math.min(1.0, (parseFloat(ramUsed)||0)/(parseFloat(ramTotal)||1)) * parent.width
-                            height: parent.height; radius: 4
-                            color: parseFloat(ramVal) > 80 ? colors.red : parseFloat(ramVal) > 60 ? colors.yellow : colors.green
-                            Behavior on width { NumberAnimation { duration: 600 } }
+                    // RAM
+                    ColumnLayout { Layout.fillWidth: true; spacing: 10
+                        RowLayout { Layout.fillWidth: true
+                            Text { text: "󰍛  RAM"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 15; color: colors.green }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: ramUsed + " / " + ramTotal + " MB"
+                                font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 18; font.bold: true; color: colors.green
+                            }
+                        }
+                        Rectangle { Layout.fillWidth: true; height: 14; radius: 7; color: colors.surface
+                            Rectangle {
+                                width: Math.min(1.0, (parseFloat(ramUsed)||0)/(parseFloat(ramTotal)||1)) * parent.width
+                                height: parent.height; radius: 7
+                                color: parseFloat(ramVal) > 80 ? colors.red : parseFloat(ramVal) > 60 ? colors.yellow : colors.green
+                                Behavior on width { NumberAnimation { duration: 600 } }
+                            }
                         }
                     }
-                    Text { text: ramUsed + "M"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 11; color: colors.subtext; Layout.preferredWidth: 36 }
-                }
 
-                // Disco
-                RowLayout {
-                    Layout.fillWidth: true; spacing: 10
-                    Text { text: "󰋊  Disco"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 11; color: colors.blue; Layout.preferredWidth: 60 }
-                    Rectangle {
-                        Layout.fillWidth: true; height: 8; radius: 4; color: colors.surface
-                        Rectangle {
-                            width: Math.min(1.0, (parseFloat(diskVal)||0)/100) * parent.width
-                            height: parent.height; radius: 4
-                            color: parseFloat(diskVal) > 85 ? colors.red : parseFloat(diskVal) > 60 ? colors.yellow : colors.blue
-                            Behavior on width { NumberAnimation { duration: 600 } }
+                    // Disco
+                    ColumnLayout { Layout.fillWidth: true; spacing: 10
+                        RowLayout { Layout.fillWidth: true
+                            Text { text: "󰋊  Disco"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 15; color: colors.blue }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: diskVal + "%"
+                                font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 24; font.bold: true; color: colors.blue
+                            }
+                        }
+                        Rectangle { Layout.fillWidth: true; height: 14; radius: 7; color: colors.surface
+                            Rectangle {
+                                width: Math.min(1.0, (parseFloat(diskVal)||0)/100) * parent.width
+                                height: parent.height; radius: 7
+                                color: parseFloat(diskVal) > 85 ? colors.red : parseFloat(diskVal) > 60 ? colors.yellow : colors.blue
+                                Behavior on width { NumberAnimation { duration: 600 } }
+                            }
                         }
                     }
-                    Text { text: diskVal + "%"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 11; color: colors.subtext; Layout.preferredWidth: 36 }
-                }
 
-                Item { Layout.fillHeight: true }
+                    Item { Layout.fillHeight: true }
+
+                    Text {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: "click fuera para cerrar"
+                        font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 9; color: colors.overlay
+                    }
+                }
             }
         }
     }
@@ -476,302 +564,1091 @@ ShellRoot {
     }
 
     // ══════════════════════════════════════
-    //  DASHBOARD CENTRAL (reloj grande + clima + forecast)
+    //  CLIMA POPUP — overlay central
     // ══════════════════════════════════════
     PanelWindow {
-        id: dashWindow
+        id: weatherWindow
         anchors.left: true
+        anchors.right: true
         anchors.top: true
-        implicitWidth: dashVisible ? 850 : 0
-        implicitHeight: 480
+        anchors.bottom: true
         exclusiveZone: -1
         color: "transparent"
-        visible: dashVisible
-        Behavior on implicitWidth { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
+        visible: weatherVisible
 
         Rectangle {
             anchors.fill: parent
-            anchors.margins: 6
-            anchors.leftMargin: 84
-            anchors.rightMargin: 6
-            color: Qt.rgba(26/255, 27/255, 38/255, 0.96)
-            radius: 20
-            border.color: Qt.rgba(187/255, 154/255, 247/255, 0.2)
-            border.width: 1
-            clip: true
+            color: Qt.rgba(0, 0, 0, 0.65)
+            MouseArea { anchors.fill: parent; onClicked: weatherVisible = false }
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 20
-                spacing: 20
+            // Tarjeta central
+            Rectangle {
+                anchors.centerIn: parent
+                width: 560
+                height: 380
+                radius: 24
+                color: colors.bg
+                border.color: Qt.rgba(122/255, 162/255, 247/255, 0.3)
+                border.width: 1
 
-                // ── Columna izquierda: calendario mini ──
+                MouseArea { anchors.fill: parent }
+
+                scale: weatherVisible ? 1.0 : 0.88
+                opacity: weatherVisible ? 1.0 : 0.0
+                Behavior on scale   { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
+                Behavior on opacity { NumberAnimation { duration: 180 } }
+
                 ColumnLayout {
-                    Layout.preferredWidth: 180
-                    Layout.fillHeight: true
-                    spacing: 10
+                    anchors.fill: parent
+                    anchors.margins: 28
+                    spacing: 0
 
-                    Text {
-                        text: {
-                            var m = ["ENE","FEB","MAR","ABR","MAY","JUN","JUL","AGO","SEP","OCT","NOV","DIC"]
-                            return m[new Date().getMonth()] + "  " + new Date().getFullYear()
+                    // ── Fila superior: icono + temp grande + descripción ──
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 20
+
+                        // Icono clima grande
+                        Text {
+                            text: weatherVal.split(" ")[0] || "?"
+                            font.family: "JetBrainsMono Nerd Font"
+                            font.pixelSize: 72
+                            color: colors.yellow
                         }
-                        font.family: "JetBrainsMono Nerd Font"
-                        font.pixelSize: 11
-                        font.bold: true
-                        color: colors.mauve
-                        font.letterSpacing: 2
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+
+                            // Temperatura
+                            Text {
+                                text: {
+                                    var t = weatherFull.split("|")[1] || "?"
+                                    return t.replace("°C","").replace("+","") + "°C"
+                                }
+                                font.family: "JetBrainsMono Nerd Font"
+                                font.pixelSize: 56; font.bold: true
+                                color: {
+                                    var t = parseFloat((weatherFull.split("|")[1]||"0").replace(/[^0-9\-]/g,""))
+                                    return t >= 30 ? colors.red : t >= 20 ? colors.yellow : t >= 10 ? colors.peach : colors.blue
+                                }
+                            }
+
+                            // Descripción
+                            Text {
+                                text: weatherFull.split("|")[0] || "Cargando..."
+                                font.family: "JetBrainsMono Nerd Font"
+                                font.pixelSize: 13; color: colors.subtext
+                            }
+
+                            // Ciudad
+                            Text {
+                                text: "󰍈  Puebla, México"
+                                font.family: "JetBrainsMono Nerd Font"
+                                font.pixelSize: 10; color: colors.overlay
+                            }
+                        }
                     }
 
-                    // Mini grid calendario
-                    GridLayout {
-                        id: miniCal
-                        columns: 7
-                        columnSpacing: 2
-                        rowSpacing: 2
+                    Item { height: 20 }
+
+                    // ── Separador ──
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Qt.rgba(255,255,255,0.07) }
+
+                    Item { height: 16 }
+
+                    // ── Stats: humedad / viento / lluvia / sensación ──
+                    RowLayout {
                         Layout.fillWidth: true
-
-                        property int dm: new Date().getMonth()
-                        property int dy: new Date().getFullYear()
-                        property int today: new Date().getDate()
-                        property int firstDay: { var d = new Date(dy, dm, 1).getDay(); return d === 0 ? 6 : d - 1 }
-                        property int daysInMonth: new Date(dy, dm + 1, 0).getDate()
+                        spacing: 0
 
                         Repeater {
-                            model: ["L","M","X","J","V","S","D"]
-                            Text { text: modelData; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 9
-                                color: colors.overlay; width: 22; horizontalAlignment: Text.AlignHCenter }
-                        }
-                        Repeater {
-                            model: 35
-                            delegate: Rectangle {
-                                width: 22; height: 20; radius: 4
-                                property int day: index - miniCal.firstDay + 1
-                                property bool valid: day >= 1 && day <= miniCal.daysInMonth
-                                property bool isToday: valid && day === miniCal.today
-                                color: isToday ? colors.mauve : "transparent"
+                            model: [
+                                { icon: "󰖎", label: "Humedad",  val: weatherFull.split("|")[2] || "-" },
+                                { icon: "󰖝", label: "Viento",   val: weatherFull.split("|")[3] || "-" },
+                                { icon: "󰼦", label: "Precip.",  val: weatherFull.split("|")[4] || "-" },
+                                { icon: "󰸗", label: "Sensación", val: (weatherFull.split("|")[1] || "?") }
+                            ]
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 4
+
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    width: 48; height: 48; radius: 12
+                                    color: Qt.rgba(255,255,255,0.04)
+                                    border.color: Qt.rgba(255,255,255,0.07); border.width: 1
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: modelData.icon
+                                        font.family: "JetBrainsMono Nerd Font"
+                                        font.pixelSize: 22; color: colors.blue
+                                    }
+                                }
+
                                 Text {
-                                    anchors.centerIn: parent
-                                    text: parent.valid ? parent.day.toString() : ""
-                                    font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 9
-                                    font.bold: parent.isToday
-                                    color: parent.isToday ? colors.bg :
-                                           (index % 7) >= 5 && parent.valid ? colors.pink : colors.subtext
+                                    Layout.alignment: Qt.AlignHCenter
+                                    text: modelData.val
+                                    font.family: "JetBrainsMono Nerd Font"
+                                    font.pixelSize: 13; font.bold: true; color: colors.text
+                                }
+
+                                Text {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    text: modelData.label
+                                    font.family: "JetBrainsMono Nerd Font"
+                                    font.pixelSize: 9; color: colors.overlay
                                 }
                             }
                         }
                     }
 
-                    Rectangle { Layout.fillWidth: true; height: 1; color: Qt.rgba(255,255,255,0.06) }
+                    Item { height: 16 }
 
-                    // Uptime / info extra
-                    Column { spacing: 4; Layout.fillWidth: true
-                        Text { text: "󰍛  RAM  " + ramUsed + " / " + ramTotal + " MB"
-                            font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 9; color: colors.subtext }
-                        Text { text: "󰻠  CPU  " + cpuVal + "%   " + cpuTemp + "°C"
-                            font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 9; color: colors.subtext }
-                        Text { text: "󰋊  Disco  " + diskVal + "%"
-                            font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 9; color: colors.subtext }
-                    }
+                    // ── Separador ──
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Qt.rgba(255,255,255,0.07) }
 
-                    Item { Layout.fillHeight: true }
-                }
+                    Item { height: 14 }
 
-                Rectangle { width: 1; Layout.fillHeight: true; color: Qt.rgba(255,255,255,0.06) }
-
-                // ── Columna central: reloj grande ──
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    spacing: 0
-
-                    Item { Layout.fillHeight: true }
-
-                    // Reloj estilo "23:40 :07"
-                    Row {
-                        Layout.alignment: Qt.AlignHCenter
-                        spacing: 0
-                        Text {
-                            id: dashHour
-                            font.family: "JetBrainsMono Nerd Font"
-                            font.pixelSize: 72
-                            font.bold: true
-                            color: colors.text
-                            Component.onCompleted: text = new Date().getHours().toString().padStart(2,'0')
-                            Timer { interval: 1000; running: true; repeat: true
-                                onTriggered: dashHour.text = new Date().getHours().toString().padStart(2,'0') }
-                        }
-                        Text {
-                            font.family: "JetBrainsMono Nerd Font"
-                            font.pixelSize: 72; font.bold: true; color: colors.mauve
-                            text: ":"
-                        }
-                        Text {
-                            id: dashMin
-                            font.family: "JetBrainsMono Nerd Font"
-                            font.pixelSize: 72; font.bold: true; color: colors.text
-                            Component.onCompleted: text = new Date().getMinutes().toString().padStart(2,'0')
-                            Timer { interval: 1000; running: true; repeat: true
-                                onTriggered: dashMin.text = new Date().getMinutes().toString().padStart(2,'0') }
-                        }
-                        Column {
-                            anchors.bottom: parent.bottom; anchors.bottomMargin: 14
-                            Text {
-                                id: dashSec
-                                font.family: "JetBrainsMono Nerd Font"
-                                font.pixelSize: 20; color: colors.overlay
-                                Component.onCompleted: text = ":" + new Date().getSeconds().toString().padStart(2,'0')
-                                Timer { interval: 1000; running: true; repeat: true
-                                    onTriggered: dashSec.text = ":" + new Date().getSeconds().toString().padStart(2,'0') }
-                            }
-                        }
-                    }
-
-                    // Fecha
-                    Text {
-                        Layout.alignment: Qt.AlignHCenter
-                        text: {
-                            var days = ["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"]
-                            var months = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
-                                         "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
-                            var d = new Date()
-                            return days[d.getDay()] + ", " + d.getDate() + " de " + months[d.getMonth()]
-                        }
-                        font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 13; color: colors.subtext
-                    }
-
-                    Item { Layout.preferredHeight: 20 }
-
-                    // Música mini (si hay)
-                    Rectangle {
-                        Layout.alignment: Qt.AlignHCenter
-                        visible: musicTitle !== ""
-                        width: 260; height: 44; radius: 12
-                        color: colors.surface
-                        border.color: Qt.rgba(154/255,206/255,106/255,0.3); border.width: 1
-
-                        RowLayout {
-                            anchors.fill: parent; anchors.margins: 10; spacing: 10
-                            Rectangle {
-                                width: 26; height: 26; radius: 6; color: colors.overlay
-                                Text { anchors.centerIn: parent; text: musicArtist.length > 0 ? musicArtist[0].toUpperCase() : "♪"
-                                    font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 14; color: colors.green }
-                            }
-                            Column {
-                                Layout.fillWidth: true; spacing: 1
-                                Text { text: musicTitle; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 10
-                                    font.bold: true; color: colors.text; elide: Text.ElideRight; width: parent.width }
-                                Text { text: musicArtist; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 9
-                                    color: colors.subtext; elide: Text.ElideRight; width: parent.width }
-                            }
-                            Text {
-                                text: musicStatus === "Playing" ? "󰏤" : "󰐊"
-                                font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 16; color: colors.green
-                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                    onClicked: { var p = Qt.createQmlObject('import Quickshell.Io; Process {}', root)
-                                        p.command = ["playerctl", "play-pause"]; p.running = true } }
-                            }
-                        }
-                    }
-
-                    Item { Layout.fillHeight: true }
-                }
-
-                Rectangle { width: 1; Layout.fillHeight: true; color: Qt.rgba(255,255,255,0.06) }
-
-                // ── Columna derecha: clima ──
-                ColumnLayout {
-                    Layout.preferredWidth: 160
-                    Layout.fillHeight: true
-                    spacing: 8
-
-                    // Temperatura grande
-                    Text {
-                        Layout.alignment: Qt.AlignHCenter
-                        text: {
-                            var parts = weatherFull.split("|")
-                            return (parts[1] || weatherVal.split(" ")[1] || "?").replace("°C","") + "°"
-                        }
-                        font.family: "JetBrainsMono Nerd Font"
-                        font.pixelSize: 52; font.bold: true
-                        color: colors.yellow
-                    }
-
-                    // Descripción
-                    Text {
-                        Layout.alignment: Qt.AlignHCenter
+                    // ── Forecast por horas ──
+                    RowLayout {
                         Layout.fillWidth: true
-                        text: weatherFull.split("|")[0] || "Cargando..."
-                        font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 10
-                        color: colors.subtext; wrapMode: Text.WordWrap
-                        horizontalAlignment: Text.AlignHCenter
-                    }
+                        spacing: 0
 
-                    Rectangle { Layout.fillWidth: true; height: 1; color: Qt.rgba(255,255,255,0.06) }
-
-                    // Stats: humedad, viento, lluvia
-                    Grid {
-                        columns: 2; spacing: 6; Layout.fillWidth: true
-                        Repeater {
-                            model: [
-                                { icon: "󰖝", label: "Viento",   val: weatherFull.split("|")[3] || "-" },
-                                { icon: "󰖎", label: "Humedad",  val: weatherFull.split("|")[2] || "-" },
-                                { icon: "󰼦", label: "Lluvia",   val: weatherFull.split("|")[4] || "-" },
-                                { icon: "󰸗", label: "Temp",     val: (weatherFull.split("|")[1] || "?") }
-                            ]
-                            Column {
-                                spacing: 1; width: 72
-                                Text { text: modelData.icon; font.family: "JetBrainsMono Nerd Font"
-                                    font.pixelSize: 14; color: colors.blue; anchors.horizontalCenter: parent.horizontalCenter }
-                                Text { text: modelData.val; font.family: "JetBrainsMono Nerd Font"
-                                    font.pixelSize: 9; color: colors.text; anchors.horizontalCenter: parent.horizontalCenter }
-                                Text { text: modelData.label; font.family: "JetBrainsMono Nerd Font"
-                                    font.pixelSize: 8; color: colors.overlay; anchors.horizontalCenter: parent.horizontalCenter }
-                            }
+                        Text {
+                            text: "Próximas horas"
+                            font.family: "JetBrainsMono Nerd Font"
+                            font.pixelSize: 10; color: colors.overlay
+                            Layout.preferredWidth: 100
+                            verticalAlignment: Text.AlignVCenter
                         }
-                    }
 
-                    Rectangle { Layout.fillWidth: true; height: 1; color: Qt.rgba(255,255,255,0.06) }
+                        Item { Layout.fillWidth: true }
 
-                    // Forecast próximas horas (simulado con offsets de temp)
-                    Text {
-                        text: "Próximas horas"
-                        font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 9
-                        color: colors.overlay; font.bold: true
-                    }
-
-                    Row {
-                        spacing: 6; Layout.fillWidth: true
+                        // Slots horarios parseados de weatherForecast
                         Repeater {
-                            model: [
-                                { h: "+1h", icon: "󰖙", t: "" },
-                                { h: "+3h", icon: "󰖐", t: "" },
-                                { h: "+6h", icon: "󰖔", t: "" },
-                            ]
-                            Column {
-                                spacing: 2; width: 44
-                                Text { text: modelData.h; font.family: "JetBrainsMono Nerd Font"
-                                    font.pixelSize: 8; color: colors.overlay; anchors.horizontalCenter: parent.horizontalCenter }
-                                Text { text: modelData.icon; font.family: "JetBrainsMono Nerd Font"
-                                    font.pixelSize: 16; color: colors.yellow; anchors.horizontalCenter: parent.horizontalCenter }
+                            model: {
+                                var slots = weatherForecast.split("§").filter(s => s.length > 0)
+                                return slots.length > 0 ? slots : ["+1h|Soleado|?°", "+3h|Parcial|?°", "+6h|Nublado|?°"]
+                            }
+
+                            Rectangle {
+                                width: 100; height: 70; radius: 12
+                                color: Qt.rgba(255,255,255,0.04)
+                                border.color: Qt.rgba(122/255,162/255,247/255,0.15); border.width: 1
+
+                                ColumnLayout {
+                                    anchors.centerIn: parent; spacing: 3
+
+                                    Text {
+                                        Layout.alignment: Qt.AlignHCenter
+                                        text: modelData.split("|")[0] || "?"
+                                        font.family: "JetBrainsMono Nerd Font"
+                                        font.pixelSize: 9; color: colors.overlay
+                                    }
+                                    Text {
+                                        Layout.alignment: Qt.AlignHCenter
+                                        text: {
+                                            var desc = (modelData.split("|")[1] || "").toLowerCase()
+                                            if (desc.includes("sun") || desc.includes("sol") || desc.includes("clear")) return "󰖙"
+                                            if (desc.includes("cloud") || desc.includes("nub")) return "󰖐"
+                                            if (desc.includes("rain") || desc.includes("lluv")) return "󰖗"
+                                            if (desc.includes("storm") || desc.includes("torment")) return "󰖓"
+                                            if (desc.includes("snow") || desc.includes("niev")) return "󰖘"
+                                            if (desc.includes("fog") || desc.includes("niet")) return "󰖑"
+                                            return "󰖐"
+                                        }
+                                        font.family: "JetBrainsMono Nerd Font"
+                                        font.pixelSize: 22; color: colors.yellow
+                                    }
+                                    Text {
+                                        Layout.alignment: Qt.AlignHCenter
+                                        text: modelData.split("|")[2] || "?"
+                                        font.family: "JetBrainsMono Nerd Font"
+                                        font.pixelSize: 11; font.bold: true; color: colors.text
+                                    }
+                                }
                             }
                         }
                     }
 
                     Item { Layout.fillHeight: true }
 
-                    // Botón cerrar
+                    // Hint
                     Text {
                         Layout.alignment: Qt.AlignHCenter
-                        text: "✕  Cerrar"; font.family: "JetBrainsMono Nerd Font"
-                        font.pixelSize: 10; color: colors.overlay
-                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                            onClicked: dashVisible = false }
+                        text: "click fuera para cerrar"
+                        font.family: "JetBrainsMono Nerd Font"
+                        font.pixelSize: 9; color: colors.overlay
                     }
                 }
             }
         }
     }
+
+    // ══════════════════════════════════════
+    //  POWER MENU — overlay central
+    // ══════════════════════════════════════
+    PanelWindow {
+        id: powerWindow
+        anchors.left: true
+        anchors.right: true
+        anchors.top: true
+        anchors.bottom: true
+        exclusiveZone: -1
+        color: "transparent"
+        visible: powerVisible
+
+        // Overlay oscuro — click fuera cancela
+        Rectangle {
+            anchors.fill: parent
+            color: Qt.rgba(0, 0, 0, 0.72)
+
+            Behavior on opacity { NumberAnimation { duration: 200 } }
+
+            MouseArea {
+                anchors.fill: parent
+                onClicked: powerVisible = false
+            }
+
+            // Tarjeta central
+            Rectangle {
+                id: powerCard
+                anchors.centerIn: parent
+                width: 480
+                height: 320
+                radius: 24
+                color: colors.bg
+                border.color: Qt.rgba(247/255, 118/255, 142/255, 0.35)
+                border.width: 1
+
+                // Evitar que el click en la tarjeta cierre el overlay
+                MouseArea { anchors.fill: parent }
+
+                // Efecto de entrada
+                scale: powerVisible ? 1.0 : 0.88
+                opacity: powerVisible ? 1.0 : 0.0
+                Behavior on scale   { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
+                Behavior on opacity { NumberAnimation { duration: 180 } }
+
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 28
+
+                    // Icono grande + título
+                    ColumnLayout {
+                        Layout.alignment: Qt.AlignHCenter
+                        spacing: 6
+
+                        Text {
+                            Layout.alignment: Qt.AlignHCenter
+                            text: "⏻"
+                            font.family: "JetBrainsMono Nerd Font"
+                            font.pixelSize: 48
+                            color: colors.red
+                        }
+
+                        Text {
+                            Layout.alignment: Qt.AlignHCenter
+                            text: "¿Qué deseas hacer?"
+                            font.family: "JetBrainsMono Nerd Font"
+                            font.pixelSize: 15
+                            color: colors.subtext
+                        }
+                    }
+
+                    // Botones de acción
+                    RowLayout {
+                        Layout.alignment: Qt.AlignHCenter
+                        spacing: 18
+
+                        Repeater {
+                            model: [
+                                { icon: "󰒲", label: "Suspender", col: colors.blue,  cmd: "systemctl suspend"  },
+                                { icon: "󰜉", label: "Reiniciar",  col: colors.yellow, cmd: "systemctl reboot"   },
+                                { icon: "⏻",  label: "Apagar",    col: colors.red,    cmd: "systemctl poweroff" }
+                            ]
+
+                            Rectangle {
+                                id: powerBtn
+                                width: 116
+                                height: 120
+                                radius: 18
+                                color: btnArea.containsMouse
+                                       ? Qt.rgba(255,255,255,0.07)
+                                       : Qt.rgba(255,255,255,0.03)
+                                border.color: btnArea.containsMouse
+                                              ? Qt.lighter(modelData.col, 1.1)
+                                              : Qt.rgba(255,255,255,0.08)
+                                border.width: 1
+
+                                Behavior on color  { ColorAnimation  { duration: 150 } }
+                                Behavior on scale  { NumberAnimation { duration: 120 } }
+                                scale: btnArea.containsMouse ? 1.05 : 1.0
+
+                                ColumnLayout {
+                                    anchors.centerIn: parent
+                                    spacing: 10
+
+                                    Text {
+                                        Layout.alignment: Qt.AlignHCenter
+                                        text: modelData.icon
+                                        font.family: "JetBrainsMono Nerd Font"
+                                        font.pixelSize: 36
+                                        color: modelData.col
+                                    }
+
+                                    Text {
+                                        Layout.alignment: Qt.AlignHCenter
+                                        text: modelData.label
+                                        font.family: "JetBrainsMono Nerd Font"
+                                        font.pixelSize: 12
+                                        color: colors.text
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: btnArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        powerVisible = false
+                                        var p = Qt.createQmlObject('import Quickshell.Io; Process {}', root)
+                                        p.command = ["bash", "-c", modelData.cmd]
+                                        p.running = true
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Hint de teclado
+                    Text {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: "Esc · click fuera para cancelar"
+                        font.family: "JetBrainsMono Nerd Font"
+                        font.pixelSize: 10
+                        color: colors.overlay
+                    }
+                }
+            }
+        }
+    }
+
+    // ══════════════════════════════════════
+    //  PANEL AGS — overlay central con tabs
+    // ══════════════════════════════════════
+    PanelWindow {
+        id: dashWindow
+        anchors.left: true
+        anchors.right: true
+        anchors.top: true
+        anchors.bottom: true
+        exclusiveZone: -1
+        color: "transparent"
+        visible: dashVisible
+
+        Rectangle {
+            anchors.fill: parent
+            color: Qt.rgba(0, 0, 0, 0.60)
+            MouseArea { anchors.fill: parent; onClicked: dashVisible = false }
+
+            // Tarjeta central
+            Rectangle {
+                id: agsCard
+                anchors.centerIn: parent
+                width: 720
+                height: 460
+                radius: 20
+                color: Qt.rgba(26/255, 27/255, 38/255, 0.97)
+                border.color: Qt.rgba(187/255, 154/255, 247/255, 0.18)
+                border.width: 1
+
+                scale: dashVisible ? 1.0 : 0.90
+                opacity: dashVisible ? 1.0 : 0.0
+                Behavior on scale   { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
+                Behavior on opacity { NumberAnimation { duration: 180 } }
+
+                MouseArea { anchors.fill: parent }
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 0
+
+                    // ── Tab bar ──
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 52
+                        color: "transparent"
+                        radius: 20
+
+                        // Borde inferior bajo los tabs
+                        Rectangle {
+                            anchors.bottom: parent.bottom
+                            width: parent.width; height: 1
+                            color: Qt.rgba(255,255,255,0.07)
+                        }
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 16
+                            anchors.rightMargin: 16
+                            spacing: 0
+
+                            Repeater {
+                                model: [
+                                    { icon: "󰲋", label: "Dashboard" },
+                                    { icon: "󰝚",  label: "Media"     },
+                                    { icon: "󰓅", label: "Performance" },
+                                    { icon: "󰕰", label: "Workspaces" }
+                                ]
+                                Item {
+                                    Layout.fillWidth: true
+                                    height: 52
+
+                                    property bool active: agsTab === index
+
+                                    // Línea activa abajo
+                                    Rectangle {
+                                        anchors.bottom: parent.bottom
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        width: active ? parent.width * 0.7 : 0
+                                        height: 2; radius: 1
+                                        color: colors.mauve
+                                        Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                                    }
+
+                                    ColumnLayout {
+                                        anchors.centerIn: parent
+                                        spacing: 2
+
+                                        Text {
+                                            Layout.alignment: Qt.AlignHCenter
+                                            text: modelData.icon
+                                            font.family: "JetBrainsMono Nerd Font"
+                                            font.pixelSize: 16
+                                            color: active ? colors.mauve : colors.overlay
+                                            Behavior on color { ColorAnimation { duration: 150 } }
+                                        }
+                                        Text {
+                                            Layout.alignment: Qt.AlignHCenter
+                                            text: modelData.label
+                                            font.family: "JetBrainsMono Nerd Font"
+                                            font.pixelSize: 9
+                                            color: active ? colors.text : colors.overlay
+                                            Behavior on color { ColorAnimation { duration: 150 } }
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: agsTab = index
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Contenido de los tabs ──
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+
+                        // ── TAB 0: DASHBOARD ──
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 20
+                            spacing: 20
+                            visible: agsTab === 0
+                            opacity: agsTab === 0 ? 1 : 0
+                            Behavior on opacity { NumberAnimation { duration: 160 } }
+
+                            // Columna izq: clima
+                            ColumnLayout {
+                                Layout.preferredWidth: 170
+                                Layout.fillHeight: true
+                                spacing: 10
+
+                                // Icono clima grande
+                                Text {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    text: weatherVal.split(" ")[0] || "?"
+                                    font.family: "JetBrainsMono Nerd Font"
+                                    font.pixelSize: 52
+                                    color: colors.yellow
+                                }
+
+                                // Temperatura
+                                Text {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    text: {
+                                        var t = weatherFull.split("|")[1] || "?"
+                                        return t.replace("°C","").replace("+","") + "°C"
+                                    }
+                                    font.family: "JetBrainsMono Nerd Font"
+                                    font.pixelSize: 32; font.bold: true
+                                    color: colors.yellow
+                                }
+
+                                Text {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    text: weatherFull.split("|")[0] || "Cargando..."
+                                    font.family: "JetBrainsMono Nerd Font"
+                                    font.pixelSize: 11; color: colors.subtext
+                                    horizontalAlignment: Text.AlignHCenter
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+
+                                Text {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    text: "󰍈  Puebla, Mx"
+                                    font.family: "JetBrainsMono Nerd Font"
+                                    font.pixelSize: 9; color: colors.overlay
+                                }
+
+                                Rectangle { Layout.fillWidth: true; height: 1; color: Qt.rgba(255,255,255,0.06) }
+
+                                // Stats clima
+                                Grid {
+                                    columns: 2; spacing: 8; Layout.fillWidth: true
+                                    Repeater {
+                                        model: [
+                                            { icon: "󰖎", label: "Humedad",  val: weatherFull.split("|")[2] || "-" },
+                                            { icon: "󰖝", label: "Viento",   val: weatherFull.split("|")[3] || "-" },
+                                            { icon: "󰼦", label: "Precip.",  val: weatherFull.split("|")[4] || "-" },
+                                            { icon: "󰸗", label: "Sensación", val: weatherFull.split("|")[1] || "?" }
+                                        ]
+                                        Column {
+                                            spacing: 1; width: 75
+                                            Text { text: modelData.icon + "  " + modelData.val
+                                                font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 10
+                                                color: colors.blue; anchors.horizontalCenter: parent.horizontalCenter }
+                                            Text { text: modelData.label; font.family: "JetBrainsMono Nerd Font"
+                                                font.pixelSize: 8; color: colors.overlay; anchors.horizontalCenter: parent.horizontalCenter }
+                                        }
+                                    }
+                                }
+
+                                Item { Layout.fillHeight: true }
+                            }
+
+                            Rectangle { width: 1; Layout.fillHeight: true; color: Qt.rgba(255,255,255,0.06) }
+
+                            // Columna centro: reloj + fecha
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                spacing: 0
+
+                                Item { Layout.fillHeight: true }
+
+                                Row {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    spacing: 0
+                                    Text {
+                                        id: agsHour
+                                        font.family: "JetBrainsMono Nerd Font"
+                                        font.pixelSize: 80; font.bold: true; color: colors.text
+                                        Component.onCompleted: text = new Date().getHours().toString().padStart(2,'0')
+                                        Timer { interval: 1000; running: true; repeat: true
+                                            onTriggered: agsHour.text = new Date().getHours().toString().padStart(2,'0') }
+                                    }
+                                    Text {
+                                        font.family: "JetBrainsMono Nerd Font"
+                                        font.pixelSize: 80; font.bold: true; color: colors.mauve; text: ":"
+                                    }
+                                    Text {
+                                        id: agsMin
+                                        font.family: "JetBrainsMono Nerd Font"
+                                        font.pixelSize: 80; font.bold: true; color: colors.text
+                                        Component.onCompleted: text = new Date().getMinutes().toString().padStart(2,'0')
+                                        Timer { interval: 1000; running: true; repeat: true
+                                            onTriggered: agsMin.text = new Date().getMinutes().toString().padStart(2,'0') }
+                                    }
+                                    Column {
+                                        anchors.bottom: parent.bottom; anchors.bottomMargin: 14
+                                        Text {
+                                            id: agsSec
+                                            font.family: "JetBrainsMono Nerd Font"
+                                            font.pixelSize: 22; color: colors.overlay
+                                            Component.onCompleted: text = ":" + new Date().getSeconds().toString().padStart(2,'0')
+                                            Timer { interval: 1000; running: true; repeat: true
+                                                onTriggered: agsSec.text = ":" + new Date().getSeconds().toString().padStart(2,'0') }
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    text: {
+                                        var days = ["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"]
+                                        var months = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
+                                        var d = new Date()
+                                        return days[d.getDay()] + ", " + d.getDate() + " de " + months[d.getMonth()]
+                                    }
+                                    font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 13; color: colors.subtext
+                                }
+
+                                Item { Layout.preferredHeight: 18 }
+
+                                // Distro + WM info
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    width: 220; height: 38; radius: 10
+                                    color: colors.surface
+                                    border.color: Qt.rgba(187/255,154/255,247/255,0.2); border.width: 1
+                                    RowLayout {
+                                        anchors.centerIn: parent; spacing: 14
+                                        Text { text: "󰕈  Ubuntu Linux"; font.family: "JetBrainsMono Nerd Font"
+                                            font.pixelSize: 11; color: colors.mauve }
+                                        Rectangle { width: 1; height: 16; color: Qt.rgba(255,255,255,0.1) }
+                                        Text { text: "  Hyprland"; font.family: "JetBrainsMono Nerd Font"
+                                            font.pixelSize: 11; color: colors.blue }
+                                    }
+                                }
+
+                                Item { Layout.fillHeight: true }
+                            }
+
+                            Rectangle { width: 1; Layout.fillHeight: true; color: Qt.rgba(255,255,255,0.06) }
+
+                            // Columna der: mini calendario
+                            ColumnLayout {
+                                Layout.preferredWidth: 185
+                                Layout.fillHeight: true
+                                spacing: 8
+
+                                Text {
+                                    text: {
+                                        var m = ["ENE","FEB","MAR","ABR","MAY","JUN","JUL","AGO","SEP","OCT","NOV","DIC"]
+                                        return m[new Date().getMonth()] + "  " + new Date().getFullYear()
+                                    }
+                                    font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 14
+                                    font.bold: true; color: colors.mauve; font.letterSpacing: 2
+                                }
+
+                                GridLayout {
+                                    id: agsMiniCal
+                                    columns: 7; columnSpacing: 4; rowSpacing: 4
+                                    Layout.fillWidth: true
+
+                                    property int dm: new Date().getMonth()
+                                    property int dy: new Date().getFullYear()
+                                    property int today: new Date().getDate()
+                                    property int firstDay: { var d = new Date(dy, dm, 1).getDay(); return d === 0 ? 6 : d - 1 }
+                                    property int daysInMonth: new Date(dy, dm + 1, 0).getDate()
+
+                                    Repeater {
+                                        model: ["L","M","X","J","V","S","D"]
+                                        Text { text: modelData; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 12
+                                            color: colors.overlay; width: 30; horizontalAlignment: Text.AlignHCenter }
+                                    }
+                                    Repeater {
+                                        model: 35
+                                        delegate: Rectangle {
+                                            width: 30; height: 26; radius: 5
+                                            property int day: index - agsMiniCal.firstDay + 1
+                                            property bool valid: day >= 1 && day <= agsMiniCal.daysInMonth
+                                            property bool isToday: valid && day === agsMiniCal.today
+                                            color: isToday ? colors.mauve : "transparent"
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: parent.valid ? parent.day.toString() : ""
+                                                font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 12
+                                                font.bold: parent.isToday
+                                                color: parent.isToday ? colors.bg :
+                                                       (index % 7) >= 5 && parent.valid ? colors.pink : colors.subtext
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Item { Layout.fillHeight: true }
+                            }
+                        }
+
+                        // ── TAB 1: MEDIA ──
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 28
+                            spacing: 32
+                            visible: agsTab === 1
+                            opacity: agsTab === 1 ? 1 : 0
+                            Behavior on opacity { NumberAnimation { duration: 160 } }
+
+                            // Portada giratoria
+                            Item {
+                                Layout.preferredWidth: 200
+                                Layout.preferredHeight: 200
+                                Layout.alignment: Qt.AlignVCenter
+
+                                // Aro decorativo giratorio
+                                Rectangle {
+                                    id: agsVinyl
+                                    anchors.centerIn: parent
+                                    width: 200; height: 200; radius: 100
+                                    color: "transparent"
+                                    border.color: colors.mauve
+                                    border.width: 2
+                                    opacity: 0.5
+
+                                    RotationAnimation on rotation {
+                                        running: musicStatus === "Playing"
+                                        loops: Animation.Infinite
+                                        duration: 8000
+                                        from: 0; to: 360
+                                    }
+
+                                    // Segmentos decorativos
+                                    Repeater {
+                                        model: 24
+                                        Rectangle {
+                                            x: 100 + 82 * Math.cos((index * 15) * Math.PI / 180) - 2
+                                            y: 100 + 82 * Math.sin((index * 15) * Math.PI / 180) - 2
+                                            width: 4; height: 4; radius: 2
+                                            color: index % 3 === 0 ? colors.mauve : colors.overlay
+                                            opacity: index % 3 === 0 ? 0.8 : 0.3
+                                        }
+                                    }
+                                }
+
+                                // Portada dentro del aro
+                                Rectangle {
+                                    anchors.centerIn: parent
+                                    width: 160; height: 160; radius: 80
+                                    color: colors.surface
+                                    clip: true
+                                    border.color: Qt.rgba(187/255,154/255,247/255,0.4); border.width: 2
+
+                                    Image {
+                                        id: agsCover
+                                        anchors.fill: parent
+                                        source: musicArtUrl !== "" ? musicArtUrl : ""
+                                        fillMode: Image.PreserveAspectCrop
+                                        visible: status === Image.Ready
+                                    }
+
+                                    // Fallback
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: musicArtist.length > 0 ? musicArtist[0].toUpperCase() : "♪"
+                                        font.family: "JetBrainsMono Nerd Font"
+                                        font.pixelSize: 52; font.bold: true
+                                        color: colors.mauve
+                                        visible: agsCover.status !== Image.Ready
+                                    }
+                                }
+
+                                // Círculo central (agujero del vinilo)
+                                Rectangle {
+                                    anchors.centerIn: parent
+                                    width: 18; height: 18; radius: 9
+                                    color: colors.bg2
+                                    border.color: colors.overlay; border.width: 1
+                                }
+                            }
+
+                            // Info + controles
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                spacing: 0
+
+                                Item { Layout.fillHeight: true }
+
+                                // Título
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: musicTitle !== "" ? musicTitle : "Sin reproducción"
+                                    font.family: "JetBrainsMono Nerd Font"
+                                    font.pixelSize: 22; font.bold: true
+                                    color: colors.text
+                                    elide: Text.ElideRight
+                                }
+
+                                Item { height: 6 }
+
+                                // Artista
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: musicArtist !== "" ? musicArtist : ""
+                                    font.family: "JetBrainsMono Nerd Font"
+                                    font.pixelSize: 14; color: colors.mauve
+                                    elide: Text.ElideRight
+                                }
+
+                                // Album
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: musicAlbum !== "" ? musicAlbum : ""
+                                    font.family: "JetBrainsMono Nerd Font"
+                                    font.pixelSize: 11; color: colors.subtext
+                                    elide: Text.ElideRight
+                                }
+
+                                Item { height: 20 }
+
+                                // Barra de progreso
+                                Item {
+                                    Layout.fillWidth: true; height: 8
+                                    Rectangle { anchors.fill: parent; radius: 4; color: colors.surface }
+                                    Rectangle {
+                                        width: {
+                                            var pos = parseFloat(musicPos) || 0
+                                            var len = parseFloat(musicLen) || 1
+                                            return Math.min(1.0, pos / len) * parent.width
+                                        }
+                                        height: parent.height; radius: 4; color: colors.mauve
+                                        Behavior on width { NumberAnimation { duration: 500 } }
+                                    }
+                                }
+
+                                Item { height: 6 }
+
+                                // Tiempo
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text {
+                                        text: {
+                                            var s = Math.floor((parseFloat(musicPos)||0) / 1000000)
+                                            return Math.floor(s/60) + ":" + String(s%60).padStart(2,'0')
+                                        }
+                                        font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 10; color: colors.overlay
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    Text {
+                                        text: {
+                                            var s = Math.floor((parseFloat(musicLen)||0) / 1000000)
+                                            return Math.floor(s/60) + ":" + String(s%60).padStart(2,'0')
+                                        }
+                                        font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 10; color: colors.overlay
+                                    }
+                                }
+
+                                Item { height: 20 }
+
+                                // Controles
+                                RowLayout {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    spacing: 32
+
+                                    Repeater {
+                                        model: [
+                                            { icon: "󰒮", cmd: "playerctl previous", big: false },
+                                            { icon: musicStatus === "Playing" ? "󰏤" : "󰐊", cmd: "playerctl play-pause", big: true },
+                                            { icon: "󰒭", cmd: "playerctl next", big: false }
+                                        ]
+                                        Text {
+                                            text: modelData.icon
+                                            font.family: "JetBrainsMono Nerd Font"
+                                            font.pixelSize: modelData.big ? 38 : 24
+                                            color: modelData.big ? colors.mauve : colors.subtext
+                                            Behavior on scale { NumberAnimation { duration: 100 } }
+                                            MouseArea {
+                                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                                hoverEnabled: true
+                                                onEntered: parent.scale = 1.15
+                                                onExited: parent.scale = 1.0
+                                                onClicked: {
+                                                    var p = Qt.createQmlObject('import Quickshell.Io; Process {}', root)
+                                                    p.command = ["bash", "-c", modelData.cmd]
+                                                    p.running = true
+                                                    Qt.callLater(() => { musicStatusProc.running = true; musicPosProc.running = true })
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Item { Layout.fillHeight: true }
+                            }
+                        }
+
+                        // ── TAB 2: PERFORMANCE ──
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 28
+                            spacing: 20
+                            visible: agsTab === 2
+                            opacity: agsTab === 2 ? 1 : 0
+                            Behavior on opacity { NumberAnimation { duration: 160 } }
+
+                            // CPU
+                            ColumnLayout { Layout.fillWidth: true; spacing: 10
+                                RowLayout { Layout.fillWidth: true
+                                    Text { text: "󰻠  CPU"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 15; color: colors.peach }
+                                    Item { Layout.fillWidth: true }
+                                    Text {
+                                        text: cpuVal + "%  ·  " + cpuTemp + "°C"
+                                        font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 20; font.bold: true
+                                        color: parseFloat(cpuVal) > 80 ? colors.red : parseFloat(cpuVal) > 50 ? colors.yellow : colors.peach
+                                    }
+                                }
+                                Rectangle { Layout.fillWidth: true; height: 16; radius: 8; color: colors.surface
+                                    Rectangle {
+                                        width: Math.min(1.0, (parseFloat(cpuVal)||0)/100) * parent.width
+                                        height: parent.height; radius: 8
+                                        gradient: Gradient {
+                                            orientation: Gradient.Horizontal
+                                            GradientStop { position: 0.0; color: colors.peach }
+                                            GradientStop { position: 1.0; color: parseFloat(cpuVal) > 80 ? colors.red : colors.yellow }
+                                        }
+                                        Behavior on width { NumberAnimation { duration: 600 } }
+                                    }
+                                }
+                            }
+
+                            // RAM
+                            ColumnLayout { Layout.fillWidth: true; spacing: 10
+                                RowLayout { Layout.fillWidth: true
+                                    Text { text: "󰍛  RAM"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 15; color: colors.green }
+                                    Item { Layout.fillWidth: true }
+                                    Text {
+                                        text: ramUsed + " / " + ramTotal + " MB"
+                                        font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 20; font.bold: true; color: colors.green
+                                    }
+                                }
+                                Rectangle { Layout.fillWidth: true; height: 16; radius: 8; color: colors.surface
+                                    Rectangle {
+                                        width: Math.min(1.0, (parseFloat(ramUsed)||0)/(parseFloat(ramTotal)||1)) * parent.width
+                                        height: parent.height; radius: 8
+                                        gradient: Gradient {
+                                            orientation: Gradient.Horizontal
+                                            GradientStop { position: 0.0; color: colors.green }
+                                            GradientStop { position: 1.0; color: parseFloat(ramVal) > 80 ? colors.red : colors.yellow }
+                                        }
+                                        Behavior on width { NumberAnimation { duration: 600 } }
+                                    }
+                                }
+                            }
+
+                            // Disco
+                            ColumnLayout { Layout.fillWidth: true; spacing: 10
+                                RowLayout { Layout.fillWidth: true
+                                    Text { text: "󰋊  Disco"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 15; color: colors.blue }
+                                    Item { Layout.fillWidth: true }
+                                    Text {
+                                        text: diskVal + "%"
+                                        font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 20; font.bold: true; color: colors.blue
+                                    }
+                                }
+                                Rectangle { Layout.fillWidth: true; height: 16; radius: 8; color: colors.surface
+                                    Rectangle {
+                                        width: Math.min(1.0, (parseFloat(diskVal)||0)/100) * parent.width
+                                        height: parent.height; radius: 8
+                                        gradient: Gradient {
+                                            orientation: Gradient.Horizontal
+                                            GradientStop { position: 0.0; color: colors.blue }
+                                            GradientStop { position: 1.0; color: parseFloat(diskVal) > 85 ? colors.red : colors.yellow }
+                                        }
+                                        Behavior on width { NumberAnimation { duration: 600 } }
+                                    }
+                                }
+                            }
+
+                            Item { Layout.fillHeight: true }
+
+                            // Hint
+                            Text {
+                                Layout.alignment: Qt.AlignHCenter
+                                text: "Actualiza cada 5 segundos"
+                                font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 9; color: colors.overlay
+                            }
+                        }
+
+                        // ── TAB 3: WORKSPACES ──
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 28
+                            spacing: 16
+                            visible: agsTab === 3
+                            opacity: agsTab === 3 ? 1 : 0
+                            Behavior on opacity { NumberAnimation { duration: 160 } }
+
+                            Text {
+                                text: "Workspaces"
+                                font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 15
+                                font.bold: true; color: colors.mauve
+                            }
+
+                            Grid {
+                                columns: 3; spacing: 14; Layout.alignment: Qt.AlignHCenter
+
+                                Repeater {
+                                    model: 9
+                                    Rectangle {
+                                        width: 180; height: 90; radius: 14
+                                        property int wsId: index + 1
+                                        property bool isActive: {
+                                            try { return Hyprland.focusedMonitor.activeWorkspace.id === wsId }
+                                            catch(e) { return false }
+                                        }
+                                        color: isActive ? Qt.rgba(187/255,154/255,247/255,0.18) : colors.surface
+                                        border.color: isActive ? colors.mauve : Qt.rgba(255,255,255,0.07)
+                                        border.width: isActive ? 2 : 1
+
+                                        Behavior on color { ColorAnimation { duration: 150 } }
+
+                                        ColumnLayout {
+                                            anchors.centerIn: parent; spacing: 6
+                                            Text {
+                                                Layout.alignment: Qt.AlignHCenter
+                                                text: wsId.toString()
+                                                font.family: "JetBrainsMono Nerd Font"
+                                                font.pixelSize: isActive ? 28 : 22; font.bold: isActive
+                                                color: isActive ? colors.mauve : colors.overlay
+                                                Behavior on font.pixelSize { NumberAnimation { duration: 150 } }
+                                            }
+                                            Text {
+                                                Layout.alignment: Qt.AlignHCenter
+                                                text: isActive ? "● activo" : ""
+                                                font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 9
+                                                color: colors.mauve
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                            hoverEnabled: true
+                                            onEntered: parent.opacity = 0.85
+                                            onExited: parent.opacity = 1.0
+                                            onClicked: {
+                                                var p = Qt.createQmlObject('import Quickshell.Io; Process {}', root)
+                                                p.command = ["hyprctl", "dispatch", "workspace", wsId.toString()]
+                                                p.running = true
+                                                dashVisible = false
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Item { Layout.fillHeight: true }
+
+                            Text {
+                                Layout.alignment: Qt.AlignHCenter
+                                text: "click en workspace para cambiar · Esc para cerrar"
+                                font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 9; color: colors.overlay
+                            }
+                        }
+                    }
+
+                    // ── Pie del panel ──
+                    Rectangle {
+                        Layout.fillWidth: true; height: 1
+                        color: Qt.rgba(255,255,255,0.07)
+                    }
+                    Item { height: 8 }
+                }
+            }
+        }
+    }
+
 
     // ══════════════════════════════════════
     //  BLUETOOTH POPUP
@@ -1517,38 +2394,6 @@ ShellRoot {
 
                 Rectangle { Layout.fillWidth: true; height: 1; color: Qt.rgba(255,255,255,0.05); visible: musicTitle !== "" }
 
-                // CPU
-                Column {
-                    Layout.alignment: Qt.AlignHCenter; spacing: 1
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: "󰻠"
-                        font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 17
-                        color: sysVisible ? colors.pink : colors.peach
-                        Behavior on color { ColorAnimation { duration: 150 } }
-                        MouseArea {
-                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                            onClicked: { sysVisible = !sysVisible; musicVisible = false }
-                        }
-                    }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: cpuVal + "%"
-                        font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 9; color: colors.subtext }
-                }
-
-                // RAM
-                Column {
-                    Layout.alignment: Qt.AlignHCenter; spacing: 1
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: "󰍛"
-                        font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 17
-                        color: sysVisible ? colors.pink : colors.green
-                        Behavior on color { ColorAnimation { duration: 150 } }
-                        MouseArea {
-                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                            onClicked: { sysVisible = !sysVisible; musicVisible = false }
-                        }
-                    }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: ramVal + "%"
-                        font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 9; color: colors.subtext }
-                }
-
                 // Volumen
                 Column {
                     Layout.alignment: Qt.AlignHCenter; spacing: 1
@@ -1606,10 +2451,28 @@ ShellRoot {
                 }
 
                 // Clima
-                Text {
-                    Layout.alignment: Qt.AlignHCenter
-                    text: weatherVal.split(" ")[0] || "?"
-                    font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 18; color: colors.yellow
+                Column {
+                    Layout.alignment: Qt.AlignHCenter; spacing: 1
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: weatherVal.split(" ")[0] || "?"
+                        font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 18
+                        color: weatherVisible ? colors.pink : colors.yellow
+                        Behavior on color { ColorAnimation { duration: 150 } }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                weatherVisible = !weatherVisible
+                                musicVisible = false; sysVisible = false; calendarVisible = false
+                                dashVisible = false; btVisible = false; volVisible = false; brightVisible = false
+                            }
+                        }
+                    }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: (weatherFull.split("|")[1] || "?").replace("°C","").replace("+","") + "°"
+                        font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 9; color: colors.subtext
+                    }
                 }
 
                 // Red
@@ -1636,6 +2499,7 @@ ShellRoot {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
                             dashVisible = !dashVisible
+                            agsTab = 0
                             calendarVisible = false; musicVisible = false; sysVisible = false; btVisible = false
                         }
                         onPressAndHold: {
@@ -1675,27 +2539,41 @@ ShellRoot {
                 // Power menu
                 Column {
                     Layout.alignment: Qt.AlignHCenter; spacing: 10
-                    Repeater {
-                        model: [
-                            {icon: "󰌾", col: "#7aa2f7", cmd: "hyprlock"},
-                            {icon: "󰜉", col: "#e0af68", cmd: "systemctl reboot"},
-                            {icon: "⏻",  col: "#f7768e", cmd: "systemctl poweroff"}
-                        ]
-                        Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            text: modelData.icon; font.family: "JetBrainsMono Nerd Font"
-                            font.pixelSize: 17; color: modelData.col
-                            Behavior on scale { NumberAnimation { duration: 150 } }
-                            MouseArea {
-                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                hoverEnabled: true
-                                onEntered: parent.scale = 1.2
-                                onExited: parent.scale = 1.0
-                                onClicked: {
-                                    var p = Qt.createQmlObject('import Quickshell.Io; Process {}', root)
-                                    p.command = ["bash", "-c", modelData.cmd]
-                                    p.running = true
-                                }
+
+                    // Lock — ejecuta directo
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: "󰌾"; font.family: "JetBrainsMono Nerd Font"
+                        font.pixelSize: 17; color: colors.blue
+                        Behavior on scale { NumberAnimation { duration: 150 } }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            hoverEnabled: true
+                            onEntered: parent.scale = 1.2
+                            onExited: parent.scale = 1.0
+                            onClicked: {
+                                var p = Qt.createQmlObject('import Quickshell.Io; Process {}', root)
+                                p.command = ["bash", "-c", "hyprlock"]
+                                p.running = true
+                            }
+                        }
+                    }
+
+                    // Apagar/reiniciar/suspender — abre el overlay de confirmación
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: "⏻"; font.family: "JetBrainsMono Nerd Font"
+                        font.pixelSize: 17; color: colors.red
+                        Behavior on scale { NumberAnimation { duration: 150 } }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            hoverEnabled: true
+                            onEntered: parent.scale = 1.2
+                            onExited: parent.scale = 1.0
+                            onClicked: {
+                                powerVisible = true
+                                musicVisible = false; sysVisible = false; calendarVisible = false
+                                dashVisible = false; btVisible = false; volVisible = false; brightVisible = false
                             }
                         }
                     }
